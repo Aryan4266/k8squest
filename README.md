@@ -40,7 +40,7 @@ K8sQuest includes **comprehensive safety guards** (enabled by default):
 - kubectl
 - kind
 - bash
-- python3
+- python3 (3.9+)
 - jq
 
 ## Platform Support
@@ -99,8 +99,8 @@ K8sQuest supports Windows! Follow these steps:
    go install sigs.k8s.io/kind@latest
    ```
 
-5. **Python 3.8+**
-   - **Recommended:** Microsoft Store (search "Python")
+5. **Python 3.9+**
+   - **Recommended:** Microsoft Store (search "Python 3.11" or newer)
    - Or download from [python.org](https://www.python.org/downloads/windows/)
 
 6. **jq** ( Required for advanced )
@@ -128,6 +128,23 @@ cd k8squest
 # 4. Start playing
 ./play.sh
 ```
+
+#### Troubleshooting: Python version
+
+**Issue:** `TypeError: 'type' object is not subscriptable` when running `./play.sh`
+- **Cause:** Python 3.8 or older is being used. K8sQuest requires **Python 3.9+**.
+- **Solution (macOS):**
+  ```bash
+  brew install python@3.11
+  # Then re-run install (it will pick up the new python3):
+  ./install.sh
+  ```
+- **Solution (Linux):**
+  ```bash
+  sudo apt install python3.11
+  sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+  ./install.sh
+  ```
 
 #### Windows Troubleshooting
 

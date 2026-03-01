@@ -10,6 +10,19 @@ command -v kind >/dev/null || { echo "❌ kind not found. Install with: brew ins
 command -v kubectl >/dev/null || { echo "❌ kubectl not found. Install with: brew install kubectl"; exit 1; }
 command -v python3 >/dev/null || { echo "❌ python3 not found"; exit 1; }
 
+# Verify Python version >= 3.9
+PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PYTHON_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
+PYTHON_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
+if [ "$PYTHON_MAJOR" -lt 3 ] || { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 9 ]; }; then
+  echo "❌ Python 3.9+ required, but found $PYTHON_VERSION"
+  echo "   Install a newer Python:"
+  echo "     macOS:  brew install python@3.11"
+  echo "     Linux:  sudo apt install python3.11"
+  echo "   Then set it as default or update the PATH so 'python3' resolves to 3.9+"
+  exit 1
+fi
+
 echo "✅ Prerequisites OK"
 echo ""
 
