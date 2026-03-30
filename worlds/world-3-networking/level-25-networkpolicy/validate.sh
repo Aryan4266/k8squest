@@ -75,24 +75,27 @@ echo "✅ NetworkPolicy '$NETWORK_POLICY' exists"
 echo ""
 
 # Stage 4: Check NetworkPolicy configuration
-echo "Stage 4: Checking NetworkPolicy configuration..."
-POLICY_SELECTOR=$(kubectl get networkpolicy $NETWORK_POLICY -n $NAMESPACE -o jsonpath='{.spec.ingress[0].from[0].podSelector.matchLabels.app}')
+MATCHING_SELECTOR=$(kubectl get networkpolicy $NETWORK_POLICY -n $NAMESPACE \
+  -o jsonpath='{.spec.ingress[*].from[*].podSelector.matchLabels.app}')
 
-if [ "$POLICY_SELECTOR" != "frontend" ]; then
-    echo "❌ VALIDATION FAILED!"
-    echo ""
-    echo "📋 Issue: NetworkPolicy allows traffic from 'app=$POLICY_SELECTOR' but should allow 'app=frontend'"
-    echo ""
-    echo "🔍 Current Configuration:"
-    echo "   NetworkPolicy allows: app=$POLICY_SELECTOR"
-    echo "   Frontend pod has label: app=frontend"
-    echo ""
-    echo "💡 Hint: The NetworkPolicy podSelector should match the frontend pod's labels"
-    echo "💡 Hint: Check the 'ingress.from.podSelector.matchLabels' in the NetworkPolicy"
-    echo ""
-    echo "🎯 What to fix:"
-    echo "   Change the NetworkPolicy to allow traffic from pods with label 'app: frontend'"
-    exit 1
+if echo "$MATCHING_SELECTOR" | tr ' ' '\n' | grep -qx "frontend"; then
+  echo "✅ NetworkPolicy allows traffic from 'app=frontend' pods"
+  echo ""
+else
+  echo "❌ VALIDATION FAILED!"
+  echo ""
+  echo "📋 Issue: No NetworkPolicy ingress rule allows traffic from 'app=frontend'"
+  echo ""
+  echo "🔍 Current Configuration:"
+  echo "   NetworkPolicy allows: ${MATCHING_SELECTOR:-<none found>}"
+  echo "   Frontend pod has label: app=frontend"
+  echo ""
+  echo "💡 Hint: The NetworkPolicy podSelector should match the frontend pod's labels"
+  echo "💡 Hint: Check the 'ingress.from.podSelector.matchLabels' in the NetworkPolicy"
+  echo ""
+  echo "🎯 What to fix:"
+  echo "   Add or update a NetworkPolicy ingress rule to allow traffic from pods with label 'app: frontend'"
+  exit 1
 fi
 echo "✅ NetworkPolicy allows traffic from 'app=frontend' pods"
 echo ""
