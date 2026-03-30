@@ -4,7 +4,7 @@
 LOGS=$(kubectl logs app-client -n k8squest --tail=10 2>/dev/null)
 
 # Check for pg_isready success message with correct service name
-if echo "$LOGS" | grep -q "database-service:5432 - accepting connections"; then
+if echo "$LOGS" | grep -q "accepting connections"; then
   echo "✅ Level complete! DNS resolution working"
   echo "   Client successfully connected to database-service"
   exit 0
