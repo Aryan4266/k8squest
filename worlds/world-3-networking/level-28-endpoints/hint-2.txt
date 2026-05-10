@@ -3,7 +3,7 @@
 The Problem Identified:
 ========================
 
-Your pods are MISSING readiness probes. Without them, Kubernetes immediately adds 
+Your pods are MISSING readiness probes. Without them, Kubernetes immediately adds
 pods to service endpoints, even if the application isn't ready to serve traffic yet.
 
 Current Situation:
@@ -18,7 +18,7 @@ metadata:
 spec:
   containers:
   - name: app
-    image: hashicorp/http-echo:0.2.3
+    image: hashicorp/http-echo:latest
     ports:
     - containerPort: 8080
     # ❌ NO readinessProbe configured!
@@ -54,7 +54,7 @@ t=11s: Traffic arrives → SUCCESS
 The Fix:
 --------
 
-Add a **readiness probe** to check if the application is ready before adding it 
+Add a **readiness probe** to check if the application is ready before adding it
 to service endpoints.
 
 ```yaml
@@ -158,7 +158,7 @@ metadata:
 spec:
   containers:
   - name: app
-    image: hashicorp/http-echo:0.2.3
+    image: hashicorp/http-echo:latest
     args:
       - "-text=Pod 1 ready"
       - "-listen=:8080"

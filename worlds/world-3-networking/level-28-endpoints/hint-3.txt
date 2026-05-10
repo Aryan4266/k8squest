@@ -17,7 +17,7 @@ metadata:
 spec:
   containers:
   - name: app
-    image: hashicorp/http-echo:0.2.3
+    image: hashicorp/http-echo:latest
     args:
       - "-text=Pod 1 ready"
       - "-listen=:8080"
@@ -44,7 +44,7 @@ metadata:
 spec:
   containers:
   - name: app
-    image: hashicorp/http-echo:0.2.3
+    image: hashicorp/http-echo:latest
     args:
       - "-text=Pod 2 ready"
       - "-listen=:8080"
@@ -95,7 +95,7 @@ Step-by-Step:
    web-app-1    0/1     ContainerCreating   0          0s
    web-app-1    0/1     Running   0          2s     ← Container started
    web-app-1    1/1     Running   0          7s     ← Readiness probe succeeded!
-   
+
    web-app-2    0/1     Pending   0          0s
    web-app-2    0/1     ContainerCreating   0          0s
    web-app-2    0/1     Running   0          2s
@@ -131,7 +131,7 @@ Step-by-Step:
    Look for:
    ```
    Readiness: http-get http://:8080/ delay=5s timeout=1s period=5s #success=1 #failure=1
-   
+
    Events:
    ...
    Normal   Pulled     Pod started
@@ -169,7 +169,7 @@ Why This Works:
        ├─> Pod marked NOT READY
        ├─> Removed from endpoints
        └─> No traffic sent (prevents errors)
-   
+
    └─> If probe succeeds:
        ├─> Pod stays READY
        └─> Remains in endpoints
@@ -193,7 +193,7 @@ readinessProbe:
 
 **Why these values?**
 
-- **initialDelaySeconds: 5** 
+- **initialDelaySeconds: 5**
   - http-echo starts quickly (~1-2 seconds)
   - 5 seconds gives buffer for slower systems
   - Too short → probes fail during startup
@@ -286,7 +286,7 @@ containers:
       port: 8080
     initialDelaySeconds: 5
     periodSeconds: 5
-  
+
   livenessProbe:      # Still alive?
     httpGet:
       path: /health
