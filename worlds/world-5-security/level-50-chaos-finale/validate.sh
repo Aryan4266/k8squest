@@ -39,11 +39,11 @@ else
 fi
 
 # 4. PriorityClass
-echo "🔍 4/9: Checking PriorityClass..."
+echo "🔍 4/9: Checking PriorityClass (looking for: 'production-priority')..."
 if ! kubectl get priorityclass production-priority &>/dev/null; then
-    echo "❌ PriorityClass missing"; ((ERRORS++))
+    echo "❌ PriorityClass 'production-priority' missing"; ((ERRORS++))
 else
-    echo "✅ PriorityClass exists"
+    echo "✅ PriorityClass 'production-priority' exists"
 fi
 
 # 5. PodDisruptionBudget
