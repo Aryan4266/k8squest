@@ -27,7 +27,8 @@ kubectl label node "$NODE_NAME" accelerator=gpu --overwrite
 
 # Verify the setup
 echo "✅ Node taints:"
-kubectl get node "$NODE_NAME" -o jsonpath='{.spec.taints}' | jq .
+kubectl get node "$NODE_NAME" -o jsonpath='{.spec.taints}'
+echo ""
 
 echo ""
 echo "✅ Node labels:"

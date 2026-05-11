@@ -23,7 +23,8 @@ kubectl taint nodes "$NODE_NAME" dedicated=gpu:NoSchedule --overwrite
 
 # Verify the taint
 echo "✅ Node taints:"
-kubectl get node "$NODE_NAME" -o jsonpath='{.spec.taints}' | jq .
+kubectl get node "$NODE_NAME" -o jsonpath='{.spec.taints}'
+echo ""
 
 echo ""
 echo "✅ Setup complete! Node is tainted - pods need tolerations to schedule."
