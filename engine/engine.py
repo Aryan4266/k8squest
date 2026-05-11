@@ -70,6 +70,22 @@ except ImportError:
     SAFETY_ENABLED = False
     print("⚠️  Warning: Safety guards module not found. Running without protection.")
 
+K8SQUEST_NAMESPACE = os.environ.get("K8SQUEST_NAMESPACE", "k8squest")
+K8S_CLUSTER_TYPE = os.environ.get("K8S_CLUSTER_TYPE", "kind")
+
+if not os.environ.get("KUBECONFIG"):
+    home = os.path.expanduser("~")
+    if K8S_CLUSTER_TYPE == "k3s":
+        k3s_config = os.path.join(home, ".kube", "k3s-config")
+        if os.path.exists(k3s_config):
+            os.environ["KUBECONFIG"] = k3s_config
+
+def get_expected_context():
+    """Return the expected kubectl context name based on cluster type."""
+    if K8S_CLUSTER_TYPE == "k3s":
+        return "k3s-k8squest"
+    return "kind-k8squest"
+
 console = Console()
 
 
@@ -101,6 +117,10 @@ def wait_for_any_key():
                 sys.stdin.read(2)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            try:
+                termios.tcflush(fd, termios.TCIFLUSH)
+            except Exception:
+                pass
 
 
 class PaginatedDisplay:
@@ -155,6 +175,10 @@ class PaginatedDisplay:
                 return ch
             finally:
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                try:
+                    termios.tcflush(fd, termios.TCIFLUSH)
+                except Exception:
+                    pass
 
     @staticmethod
     def _build_code_block_states(lines):
@@ -600,7 +624,7 @@ class K8sQuest:
 
             for resource_type in resource_types:
                 result = subprocess.run(
-                    ["kubectl", "get", resource_type, "-n", "k8squest", "--no-headers"],
+                    ["kubectl", "get", resource_type, "-n", K8SQUEST_NAMESPACE, "--no-headers"],
                     capture_output=True,
                     text=True,
                     timeout=3,
@@ -764,6 +788,19 @@ Look for "2/2" ready replicas!
         """Deploy the broken Kubernetes resources"""
         console.print("\n[yellow]🚀 Deploying mission environment...[/yellow]")
 
+        # Pre-flight connectivity check with timeout
+        check = subprocess.run(
+            ["kubectl", "get", "nodes", "--request-timeout=5s"],
+            capture_output=True, text=True,
+        )
+        if check.returncode != 0:
+            console.print(f"\n[red]⚠️  Cannot connect to cluster:[/red]")
+            console.print(f"[dim red]{check.stderr.strip()}[/dim red]")
+            console.print(f"\n[yellow]💡 Make sure k3s is running, then in your other terminal run:[/yellow]")
+            console.print(f"[dim]    export KUBECONFIG=\"$HOME/.kube/k3s-config\"[/dim]")
+            console.print(f"[dim]    kubectl config use-context {get_expected_context()}[/dim]")
+            return False
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -772,18 +809,11 @@ Look for "2/2" ready replicas!
         ) as progress:
             task = progress.add_task("Setting up namespace...", total=3)
 
-            # Delete and recreate namespace
+            # Ensure namespace exists (idempotent, skip if already there)
             result = subprocess.run(
-                ["kubectl", "delete", "namespace", "k8squest", "--ignore-not-found"],
-                capture_output=True,
-                text=True,
-            )
-            progress.advance(task)
-
-            result = subprocess.run(
-                ["kubectl", "create", "namespace", "k8squest"],
-                capture_output=True,
-                text=True,
+                ["kubectl", "apply", "-f", "-"],
+                input="apiVersion: v1\nkind: Namespace\nmetadata:\n  name: k8squest\n",
+                capture_output=True, text=True,
             )
             
             # Check for namespace creation errors
@@ -791,9 +821,16 @@ Look for "2/2" ready replicas!
                 console.print(f"\n[red]⚠️  Failed to create namespace:[/red]")
                 console.print(f"[dim red]{result.stderr}[/dim red]")
                 console.print("[yellow]💡 Hint: Make sure your kubectl context is set correctly[/yellow]")
-                console.print("[dim]Run: kubectl config use-context kind-k8squest[/dim]")
+                console.print(f"[dim]Run: kubectl config use-context {get_expected_context()}[/dim]")
                 return False
-            
+
+            # Clean up resources from previous level (without deleting the namespace)
+            progress.update(task, description="Cleaning up previous level...")
+            subprocess.run(
+                ["kubectl", "delete", "all", "--all", "-n", K8SQUEST_NAMESPACE, "--ignore-not-found"],
+                capture_output=True, text=True,
+            )
+
             progress.update(task, description="Deploying broken resources...")
             progress.advance(task)
 
@@ -864,7 +901,7 @@ Look for "2/2" ready replicas!
             text=True,
             encoding="utf-8",
             errors="replace",
-            env={**os.environ}  # Pass through environment variables
+            env={**os.environ, "NAMESPACE": K8SQUEST_NAMESPACE}  # inject namespace for validate.sh
         )
 
         # Always show output for debugging
@@ -958,16 +995,13 @@ Look for "2/2" ready replicas!
 
         # Deploy the mission
         deployment_success = self.deploy_mission(level_path, level_name)
-        
-        # If deployment failed, offer to retry or skip
         if not deployment_success:
             console.print("\n[red]⚠️  Mission deployment failed![/red]")
             console.print("[yellow]This usually means:[/yellow]")
-            console.print("  1. kubectl context is not set to 'kind-k8squest'")
-            console.print("  2. Kind cluster is not running")
+            console.print(f"  1. kubectl context is not set to '{get_expected_context()}'")
+            console.print(f"  2. {K8S_CLUSTER_TYPE.capitalize()} cluster is not running")
             console.print("  3. Docker is not running")
             console.print()
-            
             if Confirm.ask("Would you like to skip this level?", default=False):
                 return True
             else:
