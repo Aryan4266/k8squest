@@ -22,7 +22,7 @@ echo "🚧 Tainting node $NODE_NAME with dedicated=gpu:NoSchedule..."
 kubectl taint nodes "$NODE_NAME" dedicated=gpu:NoSchedule --overwrite
 
 # Label the node for affinity
-echo "🏷️  Labeling node $NODE_NAME with accelerator=gpu...""
+echo "🏷️  Labeling node $NODE_NAME with accelerator=gpu..."
 kubectl label node "$NODE_NAME" accelerator=gpu --overwrite
 
 # Verify the setup
