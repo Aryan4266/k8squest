@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: web
-        image: hashicorp/http-echo:0.2.3  # Old version
+        image: hashicorp/http-echo:latest  # Old version
         args: ["-text=Version 1.0", "-listen=:8080"]
         ports:
         - containerPort: 8080
