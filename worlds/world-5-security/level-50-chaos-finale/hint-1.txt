@@ -41,8 +41,8 @@ Fix ALL 9 World 5 concepts simultaneously!
 - All SecurityContext requirements
 
 ### ✅ 9. PriorityClass
-- Create PriorityClass
-- Assign via priorityClassName
+- Create a PriorityClass named `production-priority` with value `1000`
+- Assign via priorityClassName in the pod spec
 
 ## Strategy
 1. Start with solution.yaml as template
