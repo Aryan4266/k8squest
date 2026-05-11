@@ -70,7 +70,11 @@ except ImportError:
     SAFETY_ENABLED = False
     print("⚠️  Warning: Safety guards module not found. Running without protection.")
 
+# Web-mode / multi-user settings — injected by the engine pod at session creation.
+# When running locally these are unset and the game behaves exactly as before.
 K8SQUEST_NAMESPACE = os.environ.get("K8SQUEST_NAMESPACE", "k8squest")
+K8SQUEST_WEB = os.environ.get("K8SQUEST_WEB", "").lower() in ("1", "true")
+K8SQUEST_LEVEL = os.environ.get("K8SQUEST_LEVEL", "")
 K8S_CLUSTER_TYPE = os.environ.get("K8S_CLUSTER_TYPE", "kind")
 
 if not os.environ.get("KUBECONFIG"):
@@ -672,22 +676,37 @@ class K8sQuest:
         return "Checking..."
 
     def show_terminal_instructions(self, level_name):
-        """Show clear instructions about opening another terminal"""
-        instructions = Panel(
-            Text.from_markup(
-                "[bold yellow]📟 OPEN A NEW TERMINAL WINDOW[/bold yellow]\n\n"
-                "[cyan]While this game is running:[/cyan]\n"
-                "1️⃣  Open a NEW terminal window/tab\n"
-                "2️⃣  Use kubectl commands to fix the issue:\n"
-                "    • [dim]kubectl edit, scale, patch, etc.[/dim]\n"
-                "    • [dim]Or apply solution.yaml from level folder[/dim]\n"
-                "3️⃣  Come back here and choose 'validate' or 'check'\n\n"
-                "[dim]💡 Tip: Use Cmd+T (Mac) or Ctrl+Shift+T (Linux) to open a new tab[/dim]"
-            ),
-            title="[bold red]⚠️  IMPORTANT[/bold red]",
-            border_style="red",
-            box=box.DOUBLE,
-        )
+        """Show clear instructions about the kubectl terminal"""
+        if K8SQUEST_WEB:
+            # In web mode, the second terminal panel is already visible in the browser
+            instructions = Panel(
+                Text.from_markup(
+                    "[bold cyan]🖥️  USE THE RIGHT TERMINAL PANEL[/bold cyan]\n\n"
+                    "[cyan]The shell panel on the right is your kubectl workspace:[/cyan]\n"
+                    f"1️⃣  Use kubectl commands targeting namespace [bold]{K8SQUEST_NAMESPACE}[/bold]\n"
+                    "2️⃣  Fix the broken resources\n"
+                    "3️⃣  Come back here and choose 'validate' or 'check'"
+                ),
+                title="[bold yellow]⚡ YOUR WORKSPACE[/bold yellow]",
+                border_style="yellow",
+                box=box.DOUBLE,
+            )
+        else:
+            instructions = Panel(
+                Text.from_markup(
+                    "[bold yellow]📟 OPEN A NEW TERMINAL WINDOW[/bold yellow]\n\n"
+                    "[cyan]While this game is running:[/cyan]\n"
+                    "1️⃣  Open a NEW terminal window/tab\n"
+                    "2️⃣  Use kubectl commands to fix the issue:\n"
+                    "    • [dim]kubectl edit, scale, patch, etc.[/dim]\n"
+                    "    • [dim]Or apply solution.yaml from level folder[/dim]\n"
+                    "3️⃣  Come back here and choose 'validate' or 'check'\n\n"
+                    "[dim]💡 Tip: Use Cmd+T (Mac) or Ctrl+Shift+T (Linux) to open a new tab[/dim]"
+                ),
+                title="[bold red]⚠️  IMPORTANT[/bold red]",
+                border_style="red",
+                box=box.DOUBLE,
+            )
         console.print(instructions)
         console.print()
 
@@ -950,7 +969,13 @@ Look for "2/2" ready replicas!
                 mission["xp"],
                 mission.get("difficulty", "beginner"),
             )
-            wait_for_any_key()  # Wait for player to press any key (incl. space bar)
+            if K8SQUEST_WEB:
+                try:
+                    input()
+                except EOFError:
+                    return False
+            else:
+                wait_for_any_key()  # Wait for player to press any key (incl. space bar)
 
         # Show mission briefing with metadata
         console.clear()
@@ -993,19 +1018,20 @@ Look for "2/2" ready replicas!
 
         self.show_mission_briefing(mission, level_name)
 
-        # Deploy the mission
-        deployment_success = self.deploy_mission(level_path, level_name)
-        if not deployment_success:
-            console.print("\n[red]⚠️  Mission deployment failed![/red]")
-            console.print("[yellow]This usually means:[/yellow]")
-            console.print(f"  1. kubectl context is not set to '{get_expected_context()}'")
-            console.print(f"  2. {K8S_CLUSTER_TYPE.capitalize()} cluster is not running")
-            console.print("  3. Docker is not running")
-            console.print()
-            if Confirm.ask("Would you like to skip this level?", default=False):
-                return True
-            else:
-                return False
+        # In web mode the backend already deployed the namespace + broken resources
+        if not K8SQUEST_WEB:
+            deployment_success = self.deploy_mission(level_path, level_name)
+            if not deployment_success:
+                console.print("\n[red]⚠️  Mission deployment failed![/red]")
+                console.print("[yellow]This usually means:[/yellow]")
+                console.print(f"  1. kubectl context is not set to '{get_expected_context()}'")
+                console.print(f"  2. {K8S_CLUSTER_TYPE.capitalize()} cluster is not running")
+                console.print("  3. Docker is not running")
+                console.print()
+                if Confirm.ask("Would you like to skip this level?", default=False):
+                    return True
+                else:
+                    return False
 
         # Show terminal instructions prominently
         self.show_terminal_instructions(level_name)
@@ -1040,19 +1066,23 @@ Look for "2/2" ready replicas!
 
             console.print()
 
-            action = Prompt.ask(
-                "⚔️  Choose your action",
-                choices=[
-                    "check",
-                    "guide",
-                    "hints",
-                    "solution",
-                    "validate",
-                    "skip",
-                    "quit",
-                ],
-                default="check",
-            )
+            try:
+                action = Prompt.ask(
+                    "⚔️  Choose your action",
+                    choices=[
+                        "check",
+                        "guide",
+                        "hints",
+                        "solution",
+                        "validate",
+                        "skip",
+                        "quit",
+                    ],
+                    default="check",
+                )
+            except EOFError:
+                console.print("\n[yellow]Session disconnected.[/yellow]")
+                return False
 
             if action == "check":
                 # Real-time status monitoring
@@ -1164,6 +1194,17 @@ Look for "2/2" ready replicas!
                     "\n[yellow]👋 Thanks for playing K8sQuest! Progress saved.[/yellow]\n"
                 )
                 sys.exit(0)
+
+    def play_specific_level_by_name(self, level_name: str):
+        """Web mode: jump directly to a level by its directory name (e.g. 'level-1-pods')."""
+        import re
+        base_dir = Path(__file__).parent.parent / "worlds"
+        matches = list(base_dir.rglob(level_name))
+        if not matches:
+            console.print(f"[red]Level '{level_name}' not found.[/red]")
+            sys.exit(1)
+        level_path = matches[0]
+        self.play_level(level_path, level_name)
 
     def play_specific_level(self):
         """Allow user to select and play a specific level"""
@@ -1361,6 +1402,16 @@ Look for "2/2" ready replicas!
 def main():
     game = K8sQuest()
 
+    # Web mode: bypass all menus and jump straight to the requested level.
+    # K8SQUEST_LEVEL is set by the backend when creating the engine pod.
+    if K8SQUEST_WEB:
+        if K8SQUEST_LEVEL:
+            game.play_specific_level_by_name(K8SQUEST_LEVEL)
+        else:
+            console.print("[red]K8SQUEST_WEB is set but K8SQUEST_LEVEL is missing.[/red]")
+            sys.exit(1)
+        return
+
     # First time setup - get player name
     if game.progress["player_name"] == "Padawan":
         console.print()
@@ -1457,3 +1508,10 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         console.print("\n\n[yellow]👋 Game interrupted. Progress saved![/yellow]\n")
         sys.exit(0)
+    except EOFError:
+        sys.exit(0)
+    except Exception as e:
+        console.print(f"\n[bold red]Fatal error:[/bold red] {e}")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        sys.exit(1)
