@@ -70,6 +70,26 @@ except ImportError:
     SAFETY_ENABLED = False
     print("⚠️  Warning: Safety guards module not found. Running without protection.")
 
+# Web-mode / multi-user settings — injected by the engine pod at session creation.
+# When running locally these are unset and the game behaves exactly as before.
+K8SQUEST_NAMESPACE = os.environ.get("K8SQUEST_NAMESPACE", "k8squest")
+K8SQUEST_WEB = os.environ.get("K8SQUEST_WEB", "").lower() in ("1", "true")
+K8SQUEST_LEVEL = os.environ.get("K8SQUEST_LEVEL", "")
+K8S_CLUSTER_TYPE = os.environ.get("K8S_CLUSTER_TYPE", "kind")
+
+if not os.environ.get("KUBECONFIG"):
+    home = os.path.expanduser("~")
+    if K8S_CLUSTER_TYPE == "k3s":
+        k3s_config = os.path.join(home, ".kube", "k3s-config")
+        if os.path.exists(k3s_config):
+            os.environ["KUBECONFIG"] = k3s_config
+
+def get_expected_context():
+    """Return the expected kubectl context name based on cluster type."""
+    if K8S_CLUSTER_TYPE == "k3s":
+        return "k3s-k8squest"
+    return "kind-k8squest"
+
 console = Console()
 
 
@@ -101,6 +121,10 @@ def wait_for_any_key():
                 sys.stdin.read(2)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            try:
+                termios.tcflush(fd, termios.TCIFLUSH)
+            except Exception:
+                pass
 
 
 class PaginatedDisplay:
@@ -155,6 +179,10 @@ class PaginatedDisplay:
                 return ch
             finally:
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                try:
+                    termios.tcflush(fd, termios.TCIFLUSH)
+                except Exception:
+                    pass
 
     @staticmethod
     def _build_code_block_states(lines):
@@ -600,7 +628,7 @@ class K8sQuest:
 
             for resource_type in resource_types:
                 result = subprocess.run(
-                    ["kubectl", "get", resource_type, "-n", "k8squest", "--no-headers"],
+                    ["kubectl", "get", resource_type, "-n", K8SQUEST_NAMESPACE, "--no-headers"],
                     capture_output=True,
                     text=True,
                     timeout=3,
@@ -648,22 +676,37 @@ class K8sQuest:
         return "Checking..."
 
     def show_terminal_instructions(self, level_name):
-        """Show clear instructions about opening another terminal"""
-        instructions = Panel(
-            Text.from_markup(
-                "[bold yellow]📟 OPEN A NEW TERMINAL WINDOW[/bold yellow]\n\n"
-                "[cyan]While this game is running:[/cyan]\n"
-                "1️⃣  Open a NEW terminal window/tab\n"
-                "2️⃣  Use kubectl commands to fix the issue:\n"
-                "    • [dim]kubectl edit, scale, patch, etc.[/dim]\n"
-                "    • [dim]Or apply solution.yaml from level folder[/dim]\n"
-                "3️⃣  Come back here and choose 'validate' or 'check'\n\n"
-                "[dim]💡 Tip: Use Cmd+T (Mac) or Ctrl+Shift+T (Linux) to open a new tab[/dim]"
-            ),
-            title="[bold red]⚠️  IMPORTANT[/bold red]",
-            border_style="red",
-            box=box.DOUBLE,
-        )
+        """Show clear instructions about the kubectl terminal"""
+        if K8SQUEST_WEB:
+            # In web mode, the second terminal panel is already visible in the browser
+            instructions = Panel(
+                Text.from_markup(
+                    "[bold cyan]🖥️  USE THE RIGHT TERMINAL PANEL[/bold cyan]\n\n"
+                    "[cyan]The shell panel on the right is your kubectl workspace:[/cyan]\n"
+                    f"1️⃣  Use kubectl commands targeting namespace [bold]{K8SQUEST_NAMESPACE}[/bold]\n"
+                    "2️⃣  Fix the broken resources\n"
+                    "3️⃣  Come back here and choose 'validate' or 'check'"
+                ),
+                title="[bold yellow]⚡ YOUR WORKSPACE[/bold yellow]",
+                border_style="yellow",
+                box=box.DOUBLE,
+            )
+        else:
+            instructions = Panel(
+                Text.from_markup(
+                    "[bold yellow]📟 OPEN A NEW TERMINAL WINDOW[/bold yellow]\n\n"
+                    "[cyan]While this game is running:[/cyan]\n"
+                    "1️⃣  Open a NEW terminal window/tab\n"
+                    "2️⃣  Use kubectl commands to fix the issue:\n"
+                    "    • [dim]kubectl edit, scale, patch, etc.[/dim]\n"
+                    "    • [dim]Or apply solution.yaml from level folder[/dim]\n"
+                    "3️⃣  Come back here and choose 'validate' or 'check'\n\n"
+                    "[dim]💡 Tip: Use Cmd+T (Mac) or Ctrl+Shift+T (Linux) to open a new tab[/dim]"
+                ),
+                title="[bold red]⚠️  IMPORTANT[/bold red]",
+                border_style="red",
+                box=box.DOUBLE,
+            )
         console.print(instructions)
         console.print()
 
@@ -764,6 +807,19 @@ Look for "2/2" ready replicas!
         """Deploy the broken Kubernetes resources"""
         console.print("\n[yellow]🚀 Deploying mission environment...[/yellow]")
 
+        # Pre-flight connectivity check with timeout
+        check = subprocess.run(
+            ["kubectl", "get", "nodes", "--request-timeout=5s"],
+            capture_output=True, text=True,
+        )
+        if check.returncode != 0:
+            console.print(f"\n[red]⚠️  Cannot connect to cluster:[/red]")
+            console.print(f"[dim red]{check.stderr.strip()}[/dim red]")
+            console.print(f"\n[yellow]💡 Make sure k3s is running, then in your other terminal run:[/yellow]")
+            console.print(f"[dim]    export KUBECONFIG=\"$HOME/.kube/k3s-config\"[/dim]")
+            console.print(f"[dim]    kubectl config use-context {get_expected_context()}[/dim]")
+            return False
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -772,18 +828,11 @@ Look for "2/2" ready replicas!
         ) as progress:
             task = progress.add_task("Setting up namespace...", total=3)
 
-            # Delete and recreate namespace
+            # Ensure namespace exists (idempotent, skip if already there)
             result = subprocess.run(
-                ["kubectl", "delete", "namespace", "k8squest", "--ignore-not-found"],
-                capture_output=True,
-                text=True,
-            )
-            progress.advance(task)
-
-            result = subprocess.run(
-                ["kubectl", "create", "namespace", "k8squest"],
-                capture_output=True,
-                text=True,
+                ["kubectl", "apply", "-f", "-"],
+                input="apiVersion: v1\nkind: Namespace\nmetadata:\n  name: k8squest\n",
+                capture_output=True, text=True,
             )
             
             # Check for namespace creation errors
@@ -791,9 +840,16 @@ Look for "2/2" ready replicas!
                 console.print(f"\n[red]⚠️  Failed to create namespace:[/red]")
                 console.print(f"[dim red]{result.stderr}[/dim red]")
                 console.print("[yellow]💡 Hint: Make sure your kubectl context is set correctly[/yellow]")
-                console.print("[dim]Run: kubectl config use-context kind-k8squest[/dim]")
+                console.print(f"[dim]Run: kubectl config use-context {get_expected_context()}[/dim]")
                 return False
-            
+
+            # Clean up resources from previous level (without deleting the namespace)
+            progress.update(task, description="Cleaning up previous level...")
+            subprocess.run(
+                ["kubectl", "delete", "all", "--all", "-n", K8SQUEST_NAMESPACE, "--ignore-not-found"],
+                capture_output=True, text=True,
+            )
+
             progress.update(task, description="Deploying broken resources...")
             progress.advance(task)
 
@@ -864,7 +920,7 @@ Look for "2/2" ready replicas!
             text=True,
             encoding="utf-8",
             errors="replace",
-            env={**os.environ}  # Pass through environment variables
+            env={**os.environ, "NAMESPACE": K8SQUEST_NAMESPACE}  # inject namespace for validate.sh
         )
 
         # Always show output for debugging
@@ -913,7 +969,13 @@ Look for "2/2" ready replicas!
                 mission["xp"],
                 mission.get("difficulty", "beginner"),
             )
-            wait_for_any_key()  # Wait for player to press any key (incl. space bar)
+            if K8SQUEST_WEB:
+                try:
+                    input()
+                except EOFError:
+                    return False
+            else:
+                wait_for_any_key()  # Wait for player to press any key (incl. space bar)
 
         # Show mission briefing with metadata
         console.clear()
@@ -956,22 +1018,20 @@ Look for "2/2" ready replicas!
 
         self.show_mission_briefing(mission, level_name)
 
-        # Deploy the mission
-        deployment_success = self.deploy_mission(level_path, level_name)
-        
-        # If deployment failed, offer to retry or skip
-        if not deployment_success:
-            console.print("\n[red]⚠️  Mission deployment failed![/red]")
-            console.print("[yellow]This usually means:[/yellow]")
-            console.print("  1. kubectl context is not set to 'kind-k8squest'")
-            console.print("  2. Kind cluster is not running")
-            console.print("  3. Docker is not running")
-            console.print()
-            
-            if Confirm.ask("Would you like to skip this level?", default=False):
-                return True
-            else:
-                return False
+        # In web mode the backend already deployed the namespace + broken resources
+        if not K8SQUEST_WEB:
+            deployment_success = self.deploy_mission(level_path, level_name)
+            if not deployment_success:
+                console.print("\n[red]⚠️  Mission deployment failed![/red]")
+                console.print("[yellow]This usually means:[/yellow]")
+                console.print(f"  1. kubectl context is not set to '{get_expected_context()}'")
+                console.print(f"  2. {K8S_CLUSTER_TYPE.capitalize()} cluster is not running")
+                console.print("  3. Docker is not running")
+                console.print()
+                if Confirm.ask("Would you like to skip this level?", default=False):
+                    return True
+                else:
+                    return False
 
         # Show terminal instructions prominently
         self.show_terminal_instructions(level_name)
@@ -1006,19 +1066,23 @@ Look for "2/2" ready replicas!
 
             console.print()
 
-            action = Prompt.ask(
-                "⚔️  Choose your action",
-                choices=[
-                    "check",
-                    "guide",
-                    "hints",
-                    "solution",
-                    "validate",
-                    "skip",
-                    "quit",
-                ],
-                default="check",
-            )
+            try:
+                action = Prompt.ask(
+                    "⚔️  Choose your action",
+                    choices=[
+                        "check",
+                        "guide",
+                        "hints",
+                        "solution",
+                        "validate",
+                        "skip",
+                        "quit",
+                    ],
+                    default="check",
+                )
+            except EOFError:
+                console.print("\n[yellow]Session disconnected.[/yellow]")
+                return False
 
             if action == "check":
                 # Real-time status monitoring
@@ -1130,6 +1194,17 @@ Look for "2/2" ready replicas!
                     "\n[yellow]👋 Thanks for playing K8sQuest! Progress saved.[/yellow]\n"
                 )
                 sys.exit(0)
+
+    def play_specific_level_by_name(self, level_name: str):
+        """Web mode: jump directly to a level by its directory name (e.g. 'level-1-pods')."""
+        import re
+        base_dir = Path(__file__).parent.parent / "worlds"
+        matches = list(base_dir.rglob(level_name))
+        if not matches:
+            console.print(f"[red]Level '{level_name}' not found.[/red]")
+            sys.exit(1)
+        level_path = matches[0]
+        self.play_level(level_path, level_name)
 
     def play_specific_level(self):
         """Allow user to select and play a specific level"""
@@ -1327,6 +1402,16 @@ Look for "2/2" ready replicas!
 def main():
     game = K8sQuest()
 
+    # Web mode: bypass all menus and jump straight to the requested level.
+    # K8SQUEST_LEVEL is set by the backend when creating the engine pod.
+    if K8SQUEST_WEB:
+        if K8SQUEST_LEVEL:
+            game.play_specific_level_by_name(K8SQUEST_LEVEL)
+        else:
+            console.print("[red]K8SQUEST_WEB is set but K8SQUEST_LEVEL is missing.[/red]")
+            sys.exit(1)
+        return
+
     # First time setup - get player name
     if game.progress["player_name"] == "Padawan":
         console.print()
@@ -1423,3 +1508,10 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         console.print("\n\n[yellow]👋 Game interrupted. Progress saved![/yellow]\n")
         sys.exit(0)
+    except EOFError:
+        sys.exit(0)
+    except Exception as e:
+        console.print(f"\n[bold red]Fatal error:[/bold red] {e}")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        sys.exit(1)
