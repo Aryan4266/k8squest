@@ -17,6 +17,15 @@ metadata:
   name: writer-app
   namespace: k8squest
 spec:
+  initContainers:
+  - name: fix-perms
+    image: busybox:1.36
+    # Lock down /data so only root can access it.
+    # This ensures user 1000 cannot write without fsGroup, regardless of provisioner.
+    command: ["sh", "-c", "chmod 700 /data && chown 0:0 /data"]
+    volumeMounts:
+    - name: data
+      mountPath: /data
   containers:
   - name: app
     image: busybox:1.36
@@ -43,7 +52,7 @@ spec:
     securityContext:
       runAsUser: 1000  # App runs as user 1000
       runAsGroup: 1000
-      # ❌ Volume owned by root, user 1000 can't write!
+      # ❌ Volume owned by root with 700, user 1000 can't write!
   # ❌ Missing fsGroup to change volume ownership!
   volumes:
   - name: data

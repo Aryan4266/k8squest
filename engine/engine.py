@@ -858,7 +858,7 @@ Look for "2/2" ready replicas!
             if setup_script.exists():
                 console.print("[yellow]Running level setup script...[/yellow]")
                 result = subprocess.run(
-                    ["bash", str(setup_script)],
+                    ["bash", "setup.sh"],
                     cwd=str(level_path),
                     capture_output=True,
                     text=True,
@@ -910,11 +910,10 @@ Look for "2/2" ready replicas!
         """Run validation script and show results"""
         console.print("\n[yellow]🔍 Validating your solution...[/yellow]\n")
 
-        validate_script = level_path / "validate.sh"
-        
         # Run validation script from the level directory with proper environment
+        # Use relative name (not absolute path) so Windows/Git Bash doesn't mangle it
         result = subprocess.run(
-            ["bash", str(validate_script)],
+            ["bash", "validate.sh"],
             cwd=str(level_path),  # CRITICAL: Run from level directory
             capture_output=True,
             text=True,
