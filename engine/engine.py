@@ -1490,7 +1490,7 @@ def main():
                 if not game.play_world(world):
                     break  # Player quit
         else:
-            console.print("\n[yellow]See you later, Padawan![/yellow]\n")
+            console.print(f"\n[yellow]See you later, {game.progress['player_name']}![/yellow]\n")
     else:
         if Confirm.ask("Ready to start your training?", default=True):
             # Play all worlds from the beginning
@@ -1498,7 +1498,7 @@ def main():
                 if not game.play_world(world):
                     break  # Player quit
         else:
-            console.print("\n[yellow]See you later, Padawan![/yellow]\n")
+            console.print(f"\n[yellow]See you later, {game.progress['player_name']}![/yellow]\n")
 
 
 if __name__ == "__main__":
