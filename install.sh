@@ -191,8 +191,7 @@ log "Testing whether Python can create a virtual environment..."
 
 TEST_DIR="$(mktemp -d)"
 
-VEN​V_TEST_FAILED=0
-
+VENV_TEST_FAILED=0
 if ! python3 -m venv "$TEST_DIR/test-venv" >/dev/null 2>&1; then
     VENV_TEST_FAILED=1
 fi
