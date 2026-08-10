@@ -1,81 +1,268 @@
+```bash
 #!/bin/bash
-set -e
+
+set -euo pipefail
 
 echo "🎮 K8sQuest Installation"
 echo "========================"
 echo ""
 
-# Check prerequisites
-command -v kind >/dev/null || { echo "❌ kind not found. Install with: brew install kind"; exit 1; }
-command -v kubectl >/dev/null || { echo "❌ kubectl not found. Install with: brew install kubectl"; exit 1; }
-command -v python3 >/dev/null || { echo "❌ python3 not found"; exit 1; }
+# ------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------
 
-# Verify Python version >= 3.9 (required for type hint syntax used in engine)
-PYTHON_VERSION=$(python3 -c "import sys; v=sys.version_info; print(f'{v.major}.{v.minor}'); exit(0 if (v.major, v.minor) >= (3, 9) else 1)") || {
-  echo "❌ Python 3.9+ required, but found $PYTHON_VERSION"
-  echo "   Install a newer Python:"
-  echo "   macOS:  brew install python@3.11"
-  echo "   Linux:  sudo apt install python3.11"
-  echo "   Then ensure 'python3' resolves to 3.9+ (update PATH or alternatives)"
-  exit 1
-}
-echo "✅ Python $PYTHON_VERSION detected"
+NAMESPACE="k8squest"
+REQUIREMENTS_FILE="requirements.txt"
+VENV_DIR="venv"
 
-echo "✅ Prerequisites OK"
-echo ""
+# ------------------------------------------------------------
+# Helper functions
+# ------------------------------------------------------------
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
-  echo "🐍 Creating Python virtual environment..."
-  python3 -m venv venv
-  if [ ! -d "venv" ]; then
-    echo "❌ Failed to create virtual environment"
+error() {
+    echo "❌ $1"
     exit 1
-  fi
+}
+
+success() {
+    echo "✅ $1"
+}
+
+warning() {
+    echo "⚠️  $1"
+}
+
+info() {
+    echo "ℹ️  $1"
+}
+
+# ------------------------------------------------------------
+# Check prerequisites
+# ------------------------------------------------------------
+
+echo "🔍 Checking prerequisites..."
+echo ""
+
+# kubectl
+if ! command -v kubectl >/dev/null 2>&1; then
+    error "kubectl not found.
+
+Install kubectl and make sure it is available in PATH."
 fi
 
-# Activate virtual environment and install dependencies
+success "kubectl detected"
+
+# Python
+if ! command -v python3 >/dev/null 2>&1; then
+    error "Python 3 not found.
+
+Install Python 3.9+ using your operating system package manager."
+fi
+
+# ------------------------------------------------------------
+# Check Python version
+# ------------------------------------------------------------
+
+PYTHON_VERSION=$(python3 -c '
+import sys
+v = sys.version_info
+print(f"{v.major}.{v.minor}")
+if (v.major, v.minor) < (3, 9):
+    sys.exit(1)
+') || {
+    error "Python 3.9+ required.
+
+Detected Python version: ${PYTHON_VERSION:-unknown}"
+}
+
+success "Python $PYTHON_VERSION detected"
+
+# ------------------------------------------------------------
+# Check kubectl configuration
+# ------------------------------------------------------------
+
+echo ""
+echo "☸️  Checking Kubernetes cluster..."
+echo ""
+
+if ! kubectl version --request-timeout=10s >/dev/null 2>&1; then
+    error "Unable to connect to Kubernetes.
+
+Make sure:
+  1. A Kubernetes cluster is running
+  2. kubectl is installed
+  3. Your kubeconfig is configured
+  4. kubectl can access the cluster
+
+Try:
+  kubectl get nodes"
+fi
+
+success "Kubernetes API is reachable"
+
+# ------------------------------------------------------------
+# Display cluster information
+# ------------------------------------------------------------
+
+echo ""
+echo "📡 Kubernetes cluster:"
+echo ""
+
+kubectl cluster-info
+
+echo ""
+echo "🖥️  Kubernetes nodes:"
+kubectl get nodes -o wide
+
+# ------------------------------------------------------------
+# Check node readiness
+# ------------------------------------------------------------
+
+echo ""
+echo "🔎 Checking node readiness..."
+
+NOT_READY_NODES=$(kubectl get nodes \
+    --no-headers \
+    | awk '$2 != "Ready" {print $1}')
+
+if [ -n "$NOT_READY_NODES" ]; then
+    warning "The following nodes are not Ready:"
+    echo "$NOT_READY_NODES"
+    echo ""
+    warning "K8sQuest installation will continue, but workloads may not start."
+else
+    success "All Kubernetes nodes are Ready"
+fi
+
+# ------------------------------------------------------------
+# Check requirements.txt
+# ------------------------------------------------------------
+
+echo ""
+
+if [ ! -f "$REQUIREMENTS_FILE" ]; then
+    error "$REQUIREMENTS_FILE not found.
+
+Run this script from the K8sQuest project root."
+fi
+
+success "$REQUIREMENTS_FILE found"
+
+# ------------------------------------------------------------
+# Create Python virtual environment
+# ------------------------------------------------------------
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo ""
+    echo "🐍 Creating Python virtual environment..."
+
+    python3 -m venv "$VENV_DIR"
+
+    if [ ! -f "$VENV_DIR/bin/activate" ]; then
+        error "Failed to create Python virtual environment."
+    fi
+
+    success "Virtual environment created"
+else
+    success "Python virtual environment already exists"
+fi
+
+# ------------------------------------------------------------
+# Activate virtual environment
+# ------------------------------------------------------------
+
+echo ""
 echo "📦 Installing Python dependencies..."
-if [ -f "venv/bin/activate" ]; then
-  source venv/bin/activate
-elif [ -f "venv/Scripts/activate" ]; then
-  source venv/Scripts/activate
-else
-  echo "❌ Virtual environment activation script not found"
-  echo "Expected: venv/bin/activate or venv/Scripts/activate"
-  exit 1
-fi
-pip install -q -r requirements.txt
 
-echo "✅ Python packages installed"
+if [ ! -f "$VENV_DIR/bin/activate" ]; then
+    error "Virtual environment activation script not found:
+$VENV_DIR/bin/activate"
+fi
+
+source "$VENV_DIR/bin/activate"
+
+# Upgrade pip
+python -m pip install --upgrade pip -q
+
+# Install requirements
+python -m pip install -q -r "$REQUIREMENTS_FILE"
+
+success "Python packages installed"
+
+# ------------------------------------------------------------
+# Kubernetes namespace
+# ------------------------------------------------------------
+
 echo ""
+echo "🏗️  Setting up Kubernetes namespace..."
 
-# Create Kubernetes cluster
-if ! kind get clusters | grep k8squest >/dev/null 2>&1; then
-  echo "🔧 Creating Kubernetes cluster..."
-  kind create cluster --name k8squest
-else
-  echo "✅ Cluster already exists"
-fi
+kubectl create namespace "$NAMESPACE" \
+    --dry-run=client \
+    -o yaml \
+    | kubectl apply -f -
 
-kubectl config use-context kind-k8squest
+success "Namespace '$NAMESPACE' ready"
 
-# Create k8squest namespace
-echo "🏗️  Setting up k8squest namespace..."
-kubectl create namespace k8squest --dry-run=client -o yaml | kubectl apply -f -
+# ------------------------------------------------------------
+# Setup RBAC
+# ------------------------------------------------------------
 
-# Setup RBAC for safety
-echo "🛡️  Configuring safety guards (RBAC)..."
+echo ""
+echo "🛡️  Configuring K8sQuest RBAC..."
+
 if [ -f "rbac/k8squest-rbac.yaml" ]; then
-  kubectl apply -f rbac/k8squest-rbac.yaml
-  echo "✅ Safety guards configured"
+
+    kubectl apply -f "rbac/k8squest-rbac.yaml"
+
+    success "RBAC configuration applied"
+
 else
-  echo "⚠️  Warning: RBAC config not found, skipping"
+
+    warning "rbac/k8squest-rbac.yaml not found"
+    warning "Skipping RBAC configuration"
 fi
 
+# ------------------------------------------------------------
+# Verify namespace
+# ------------------------------------------------------------
+
 echo ""
-echo "🚀 Setup Complete!"
+echo "🔎 Verifying Kubernetes setup..."
+
+if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+    success "Namespace '$NAMESPACE' is available"
+else
+    error "Failed to create namespace '$NAMESPACE'"
+fi
+
+# ------------------------------------------------------------
+# Final output
+# ------------------------------------------------------------
+
 echo ""
-echo "To start playing, use the shortcut:"
-echo "  ./play.sh"
+echo "======================================"
+echo "🚀 K8sQuest Setup Complete!"
+echo "======================================"
 echo ""
+
+echo "☸️  Kubernetes Context:"
+kubectl config current-context
+
+echo ""
+echo "📦 Namespace:"
+echo "   $NAMESPACE"
+
+echo ""
+echo "🎮 To start playing:"
+echo "   ./play.sh"
+
+echo ""
+echo "🔍 Useful commands:"
+echo ""
+echo "   kubectl get nodes"
+echo "   kubectl get pods -n $NAMESPACE"
+echo "   kubectl get all -n $NAMESPACE"
+echo ""
+
+echo "Have fun learning Kubernetes! 🎮☸️"
+```
